@@ -9,20 +9,51 @@ const path = require('path');
 const cron = require('node-cron');
 
 const PORT = process.env.PORT || 3000;
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@example.com';
 const CRON_SECRET = process.env.CRON_SECRET || ''; // required to trigger /api/send-daily
 const TIMEZONE = process.env.TZ_NAME || 'Africa/Lagos';
 
 const SUBS_FILE = path.join(__dirname, 'subscriptions.json');
 const DATA_FILE = path.join(__dirname, 'public', 'data', 'birthdays.json');
+const VAPID_FILE = path.join(__dirname, 'vapid-keys.json');
 
-if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-} else {
-  console.warn('⚠️  VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set. Push notifications will not work until you set them (see README).');
+// ─── VAPID KEYS: self-healing, no manual paste required ────────────────────
+// If valid keys are set as env vars, use them. Otherwise, generate a fresh
+// valid pair automatically and save it to disk so it stays the same across
+// restarts (until the next code deploy, which resets the filesystem).
+function isValidVapidPrivateKey(key) {
+  try {
+    const s = String(key).replace(/-/g, '+').replace(/_/g, '/');
+    const padded = s + '='.repeat((4 - (s.length % 4)) % 4);
+    return Buffer.from(padded, 'base64').length === 32;
+  } catch (e) {
+    return false;
+  }
 }
+
+let VAPID_PUBLIC_KEY = (process.env.VAPID_PUBLIC_KEY || '').trim();
+let VAPID_PRIVATE_KEY = (process.env.VAPID_PRIVATE_KEY || '').trim();
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY || !isValidVapidPrivateKey(VAPID_PRIVATE_KEY)) {
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf-8')); } catch (e) { /* none yet */ }
+
+  if (saved && isValidVapidPrivateKey(saved.privateKey)) {
+    VAPID_PUBLIC_KEY = saved.publicKey;
+    VAPID_PRIVATE_KEY = saved.privateKey;
+    console.log('ℹ️  Using previously auto-generated VAPID keys from vapid-keys.json');
+  } else {
+    const generated = webpush.generateVAPIDKeys();
+    VAPID_PUBLIC_KEY = generated.publicKey;
+    VAPID_PRIVATE_KEY = generated.privateKey;
+    fs.writeFileSync(VAPID_FILE, JSON.stringify(generated, null, 2));
+    console.log('✅ No valid VAPID keys were provided — generated and saved a new pair automatically.');
+  }
+} else {
+  console.log('ℹ️  Using VAPID keys from environment variables.');
+}
+
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
 function loadSubscriptions() {
   try {
@@ -44,7 +75,6 @@ function loadBirthdays() {
 }
 
 function todayInTZ() {
-  // Get today's month/day in the configured timezone without extra deps.
   const now = new Date();
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric' });
   const parts = fmt.formatToParts(now).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
@@ -76,10 +106,9 @@ async function sendDailyBirthdayPush() {
       sent++;
       stillValid.push(sub);
     } catch (err) {
-      // 410/404 = subscription expired or unsubscribed on the device; drop it.
       if (err.statusCode !== 410 && err.statusCode !== 404) {
         console.error('Push send error:', err.statusCode, err.body);
-        stillValid.push(sub); // keep it, might be a transient error
+        stillValid.push(sub);
       } else {
         console.log('Removing expired subscription');
       }
@@ -94,7 +123,6 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Frontend reads this to get the public VAPID key (never expose the private key).
 app.get('/config.js', (req, res) => {
   res.type('application/javascript');
   res.send(`const VAPID_PUBLIC_KEY = "${VAPID_PUBLIC_KEY}";`);
@@ -118,9 +146,6 @@ app.post('/api/unsubscribe', (req, res) => {
   res.json({ ok: true });
 });
 
-// Manually trigger today's push — used either for testing, or by an external
-// free cron service (e.g. cron-job.org) hitting this once a day, which is more
-// reliable than an in-process timer on free hosts that sleep when idle.
 app.all('/api/send-daily', async (req, res) => {
   const key = req.query.key || (req.body && req.body.key);
   if (!CRON_SECRET || key !== CRON_SECRET) {
@@ -132,8 +157,6 @@ app.all('/api/send-daily', async (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ ok: true, subscriberCount: loadSubscriptions().length }));
 
-// Fallback in-process schedule (only fires reliably on hosts that stay awake).
-// Runs every day at 07:00 in the configured timezone.
 cron.schedule('0 7 * * *', () => {
   sendDailyBirthdayPush().catch((e) => console.error('Cron send failed', e));
 }, { timezone: TIMEZONE });
