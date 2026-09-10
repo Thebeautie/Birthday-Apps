@@ -1,17 +1,10 @@
 {
   "name": "epe-lgea-birthday-dashboard",
   "version": "1.0.0",
-  "description": "EPE LGEA staff birthday dashboard PWA with push notifications",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
+  "private": true,
+  "description": "EPE LGEA Birthday Dashboard with installable PWA and push notifications",
   "dependencies": {
-    "express": "^4.19.2",
-    "node-cron": "^3.0.3",
-    "web-push": "^3.6.7"
-  },
-  "engines": {
-    "node": ">=18"
+    "web-push": "^3.6.7",
+    "@netlify/blobs": "^7.0.1"
   }
 }
