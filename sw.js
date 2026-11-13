@@ -1,13 +1,23 @@
-const CACHE_NAME = 'epe-birthdays-v1';
-const CORE_ASSETS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const CACHE_NAME = 'epe-bday-v2';
+const ASSETS = [
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './birthdays.json',
+  './wishes.js'
+];
 
+// Install: pre-cache the app shell + data so it works offline.
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
 
+// Activate: clean up old caches.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -17,51 +27,52 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Fetch: try the network first so a new staff list or app update shows up
+// straight away; fall back to the saved copy when offline.
 self.addEventListener('fetch', (event) => {
-  // Network-first for navigation so the dashboard data stays fresh;
-  // fall back to cache when offline.
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
-    );
-    return;
-  }
+  if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((res) => {
+        if (res && res.ok && new URL(event.request.url).origin === self.location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(event.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(event.request).then((hit) => hit || caches.match('./index.html')))
   );
 });
 
-// ── PUSH NOTIFICATIONS ──────────────────────────────────────────────
+// Push: this is what fires the notification even if the app/browser is closed.
 self.addEventListener('push', (event) => {
-  let data = { title: '🎂 Birthday Reminder', body: 'There are birthdays today at EPE LGEA.' };
+  let payload = { title: '🎂 Birthday Reminder', body: 'Check today\'s birthdays', url: './index.html' };
   try {
-    if (event.data) data = event.data.json();
+    if (event.data) payload = { ...payload, ...event.data.json() };
   } catch (e) {
-    if (event.data) data.body = event.data.text();
+    if (event.data) payload.body = event.data.text();
   }
-
-  const options = {
-    body: data.body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    vibrate: [200, 100, 200],
-    data: { url: data.url || '/' },
-  };
-
-  event.waitUntil(self.registration.showNotification(data.title, options));
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      data: { url: payload.url || './index.html' },
+      vibrate: [100, 50, 100]
+    })
+  );
 });
 
+// Notification click: focus/open the app.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
+  const url = (event.notification.data && event.notification.data.url) || './index.html';
   event.waitUntil(
-    self.clients.matchAll({ type: 'window' }).then((clients) => {
-      for (const client of clients) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          return client.focus();
-        }
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) return client.focus();
       }
-      return self.clients.openWindow(url);
+      if (clients.openWindow) return clients.openWindow(url);
     })
   );
 });

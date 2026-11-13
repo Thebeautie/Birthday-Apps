@@ -1,25 +1,15 @@
 {
   "name": "EPE LGEA Birthday Dashboard",
   "short_name": "EPE Birthdays",
-  "description": "Staff birthday dashboard and WhatsApp reminder centre for EPE LGEA",
-  "start_url": "/",
-  "scope": "/",
+  "description": "Staff birthday dashboard and reminders for EPE LGEA",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#1a0a2e",
-  "theme_color": "#7c3aed",
+  "background_color": "#f0f4f8",
+  "theme_color": "#1a0a2e",
   "orientation": "portrait-primary",
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }
